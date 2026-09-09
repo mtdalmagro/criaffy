@@ -60,8 +60,8 @@
   //   { send_instantly: true }        -> XHR imediato (nao espera o batch de ~3s)
   //   { transport: "sendBeacon" }     -> sobrevive a navegacao/unload da pagina
   function cap(name, props, opts) {
-    try { posthog.capture(name, props, opts); }
-    catch (e) { log("capture falhou:", name, e); }
+    try { posthog.capture(name, props, opts); log("capture:", name, opts || ""); }
+    catch (e) { log("capture FALHOU:", name, e); }
   }
 
   function uuid() {
@@ -127,14 +127,17 @@
 
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
+    debug: CFG.debug === true,
     person_profiles: "always",          // cria pessoa mesmo pra anonimo -> unicos por person_id
     autocapture: false,                 // so eventos nomeados; dashboard depende dos nomes exatos
     capture_pageview: false,            // usamos page_init
     capture_pageleave: false,           // usamos time_on_page
+    request_batching: false,            // cada evento = 1 request imediato (nada preso num batch que morre no unload)
     disable_session_recording: CFG.disableSessionRecording === true,
     persistence: "localStorage+cookie",
     loaded: function (ph) {
       try { ph.identify(userId); } catch (e) {}
+      log("posthog loaded; identify=", userId);
     }
   });
 
@@ -239,6 +242,7 @@
   }
 
   var hbTimer = setInterval(function () { timeTick("hb"); }, 1000);
+  log("heartbeat armado (step=" + HB_STEP + "s, max=" + HB_MAX + "s)");
 
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") {
@@ -263,9 +267,10 @@
   }
   document.addEventListener("click", function (ev) {
     var el = findCta(ev.target);
-    if (!el) return;
+    if (!el) { log("click sem [data-bb-cta]"); return; }
     var text = (el.textContent || el.value || "")
       .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "").slice(0, 200);
+    log("cta_clicked ->", el.getAttribute("data-bb-pack"));
     cap("cta_clicked", {
       pack: el.getAttribute("data-bb-pack") || null,
       text: text || null,
@@ -287,6 +292,7 @@
       var m = MARKS[i];
       if (p >= m && !firedMark[m]) {
         firedMark[m] = true;
+        log("scroll_depth ->", m, "(" + p + "%)");
         cap("scroll_depth", { depth: m, percent: p }, { transport: "sendBeacon" });
       }
     }
