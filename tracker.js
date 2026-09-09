@@ -14,7 +14,8 @@
  *   page_init      - UTMs + referrer + device
  *   utm_captured   - so quando ha UTM na URL
  *   scroll_depth   - marcos 25 / 50 / 75 / 100
- *   time_on_page   - ao sair da pagina (segundos)
+ *   time_on_page   - HEARTBEAT a cada 5s de tempo ativo (bucket 5/10/15...) +
+ *                    1 tick final { final:true } no unload/navegacao (sendBeacon)
  *   cta_clicked    - clique em [data-bb-cta]  (pack / text / href)
  *
  * Todos os eventos carregam as super properties  pageType  e  pageId.
@@ -198,22 +199,57 @@
   }
 
   // -------------------------------------------------------------------------
-  // time_on_page  (ao sair)  -- registrado PRIMEIRO: nao pode se perder
+  // time_on_page  -- HEARTBEAT: 1 evento a cada HB_STEP seg de tempo ATIVO
+  //   heartbeat  -> { heartbeat:true, final:false, bucket:5|10|15..., seconds:bucket }
+  //   fim (saida/navegacao) -> { final:true, heartbeat:false, seconds:<exato> } via sendBeacon
+  //   o tempo so acumula enquanto a aba esta VISIVEL (curva de leitura real).
+  //   Dashboard (Etapa 4): curva de retencao = count(DISTINCT person_id) por bucket.
+  //   Registrado cedo: o tick final nao pode se perder.
   // -------------------------------------------------------------------------
-  var t0 = Date.now();
-  var timeSent = false;
-  function sendTime() {
-    if (timeSent) return;
-    timeSent = true;
-    var secs = Math.max(0, Math.round((Date.now() - t0) / 1000));
-    // sendBeacon: sobrevive ao unload/navegacao
-    cap("time_on_page", { seconds: secs, max_scroll_percent: scrollPct() }, { transport: "sendBeacon" });
+  var HB_STEP = Math.max(1, CFG.heartbeatSeconds || 5);            // seg por bucket
+  var HB_MAX  = Math.max(HB_STEP, CFG.heartbeatMaxSeconds || 300); // para de "bater" apos isso (o tick final ainda vai)
+  var activeAccumMs = 0;                                            // ms ativos acumulados (aba visivel)
+  var visibleSince = (document.visibilityState === "hidden") ? 0 : Date.now();
+  var lastBucketSent = 0;
+  var endSent = false;
+
+  function activeSecs() {
+    return Math.floor((activeAccumMs + (visibleSince ? Date.now() - visibleSince : 0)) / 1000);
   }
+
+  // mode: "hb" (batida normal) | "flush" (aba escondeu, via beacon) | "end" (fim, via beacon)
+  function timeTick(mode) {
+    var secs = activeSecs();
+    var bucket = Math.floor(secs / HB_STEP) * HB_STEP;
+    if (mode === "end") {
+      if (endSent) return;
+      endSent = true;
+      cap("time_on_page",
+        { seconds: secs, bucket: bucket, final: true, heartbeat: false, max_scroll_percent: scrollPct() },
+        { transport: "sendBeacon" });
+      return;
+    }
+    if (bucket > HB_MAX) { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } return; }
+    if (bucket < HB_STEP) return;
+    if (mode === "hb" && bucket === lastBucketSent) return;
+    lastBucketSent = bucket;
+    cap("time_on_page",
+      { seconds: bucket, bucket: bucket, final: false, heartbeat: true, max_scroll_percent: scrollPct() },
+      mode === "flush" ? { transport: "sendBeacon" } : undefined);
+  }
+
+  var hbTimer = setInterval(function () { timeTick("hb"); }, 1000);
+
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden") sendTime();
+    if (document.visibilityState === "hidden") {
+      if (visibleSince) { activeAccumMs += Date.now() - visibleSince; visibleSince = 0; }
+      timeTick("flush");            // checkpoint (a pessoa pode voltar) - nao e o fim
+    } else {
+      visibleSince = Date.now();    // retomou: volta a acumular
+    }
   });
-  window.addEventListener("pagehide", sendTime);
-  window.addEventListener("beforeunload", sendTime);
+  window.addEventListener("pagehide", function () { timeTick("end"); });
+  window.addEventListener("beforeunload", function () { timeTick("end"); });
 
   // -------------------------------------------------------------------------
   // cta_clicked  (clique em [data-bb-cta])  -- dispara logo antes de navegar
