@@ -402,6 +402,83 @@
     .hero{padding-top:40px;}
   }
 </style>
+
+<!-- ═══════════════════════ BB TRACKER (funil) ═══════════════════════ -->
+<!-- 1. Config (antes do bb-tracker.js) -->
+<script>
+  window.BB_TRACKER_CONFIG = {
+    pageType: 'landing',
+    pageId: 'main',            // KEY das env vars no bb-tracker (TIKTOK_MAIN_*, META_MAIN_*)
+    currency: 'BRL',
+    capiEndpoint: 'https://bb-tracker-template-pi.vercel.app/api/capi/event'
+    // gtmId: 'GTM-XXXXXXX',        // adicionar quando tiver container GTM
+    // ga4MeasurementId: 'G-XXXXXXXXXX'
+  };
+  // Sem GTM ainda: impede o bb-tracker.js de tentar baixar 'GTM-XXXXXXX' (2x 404).
+  // REMOVER esta linha quando definir um gtmId real acima.
+  (window.dataLayer = window.dataLayer || []).push({ 'gtm.start': Date.now(), event: 'gtm.js' });
+</script>
+
+<!-- 2. bb-tracker.js (do deploy) -->
+<script src="https://bb-tracker-template-pi.vercel.app/bb-tracker.js" defer></script>
+
+<!-- 3. Basic Code TikTok — DESCOMENTA e troca __TIKTOK_PIXEL_ID__ quando tiver o pixel (task B4) -->
+<!--
+<script>
+!function (w, d, t) {
+  w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var r="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=r,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};n=document.createElement("script");n.type="text/javascript",n.async=!0,n.src=r+"?sdkid="+e+"&lib="+t;e=document.getElementsByTagName("script")[0];e.parentNode.insertBefore(n,e)};
+  ttq.load('__TIKTOK_PIXEL_ID__');
+  ttq.page();
+}(window, document, 'ttq');
+</script>
+-->
+
+<!-- 4. Basic Code Meta — DESCOMENTA e troca __META_PIXEL_ID__ quando tiver o pixel (task B5) -->
+<!--
+<script>
+!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '__META_PIXEL_ID__');
+fbq('track', 'PageView');
+</script>
+-->
+
+<!-- 5. Propaga atribuicao (ttclid/fbclid/utm/bb_user_id) pros links do Shopify.
+     bb-tracker.js NAO faz isso sozinho. Casa com o BB TRACKER BRIDGE no theme.liquid. -->
+<script>
+(function () {
+  var SHOP = '1dwsmt-zz.myshopify.com';
+  var URLKEYS = ['ttclid','fbclid','ttp','fbc','fbp','utm_source','utm_medium','utm_campaign','utm_content','utm_term','utm_id'];
+  function cookie(n){ var m=('; '+document.cookie).split('; '+n+'='); return m.length===2 ? decodeURIComponent(m.pop().split(';').shift()) : ''; }
+  function collect() {
+    var p = new URLSearchParams(location.search), out = {};
+    URLKEYS.forEach(function (k) { var v = p.get(k); if (v) out[k] = v; });
+    if (!out.ttclid) { var s = sessionStorage.getItem('bb_ttclid'); if (s) out.ttclid = s; }
+    try {
+      var u = JSON.parse(sessionStorage.getItem('bb_utms') || '{}');
+      Object.keys(u).forEach(function (k) { if (!out[k]) out[k] = u[k]; });
+    } catch (e) {}
+    if (!out.ttp) { var t = cookie('_ttp'); if (t) out.ttp = t; }
+    if (!out.fbp) { var f = cookie('_fbp'); if (f) out.fbp = f; }
+    if (!out.fbc) { var c = cookie('_fbc'); if (c) out.fbc = c; else if (out.fbclid) out.fbc = 'fb.1.' + Date.now() + '.' + out.fbclid; }
+    try { var uid = localStorage.getItem('bb_user_id'); if (uid) out.bb_user_id = uid; } catch (e) {}
+    return out;
+  }
+  function decorate(a) {
+    var raw = a.getAttribute('href'); if (!raw || raw.charAt(0) === '#') return;
+    try {
+      var u = new URL(raw, location.href);
+      if (u.hostname !== SHOP) return;
+      var data = collect();
+      Object.keys(data).forEach(function (k) { if (!u.searchParams.has(k)) u.searchParams.set(k, data[k]); });
+      a.setAttribute('href', u.toString());
+    } catch (e) {}
+  }
+  function run(){ document.querySelectorAll('a[href]').forEach(decorate); }
+  if (document.readyState !== 'loading') run(); else document.addEventListener('DOMContentLoaded', run);
+  document.addEventListener('click', function (e) { var a = e.target.closest && e.target.closest('a[href]'); if (a) decorate(a); }, true);
+})();
+</script>
+<!-- ═══════════════════════ /BB TRACKER ═══════════════════════ -->
 </head>
 <body>
 
@@ -643,7 +720,8 @@
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 12l5 5L20 6" stroke="#82F3C7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Compartilhamento pra grupos de WhatsApp e Facebook</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 12l5 5L20 6" stroke="#82F3C7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Suporte por e-mail</li>
         </ul>
-        <a href="#" class="plan-cta">Começar com o Mensal</a>
+        <!-- TODO B9: trocar href="#" pela URL do checkout/produto Shopify (plano Mensal, R$169,70/mês) -->
+        <a href="#" class="plan-cta" data-bb-cta data-bb-pack="mensal">Começar com o Mensal</a>
       </div>
 
       <div class="plan featured">
@@ -658,7 +736,8 @@
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 12l5 5L20 6" stroke="#82F3C7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Sem mensalidade, acesso vitalício</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 12l5 5L20 6" stroke="#82F3C7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Suporte prioritário</li>
         </ul>
-        <a href="#" class="plan-cta">Garantir o Vitalício</a>
+        <!-- TODO B9: trocar href="#" pela URL do checkout/produto Shopify (plano Vitalício, R$269,70 único) -->
+        <a href="#" class="plan-cta" data-bb-cta data-bb-pack="vitalicio">Garantir o Vitalício</a>
       </div>
     </div>
   </section>
