@@ -39,9 +39,30 @@
   // -------------------------------------------------------------------------
   // helpers
   // -------------------------------------------------------------------------
+  var _panel = null;
   function log() {
-    if (!CFG.debug || !window.console) return;
-    try { console.log.apply(console, ["[bb-tracker]"].concat([].slice.call(arguments))); } catch (e) {}
+    if (!CFG.debug) return;
+    var args = [].slice.call(arguments);
+    try { if (window.console) console.log.apply(console, ["[bb-tracker]"].concat(args)); } catch (e) {}
+    try {
+      if (!_panel && document.body) {
+        _panel = document.createElement("div");
+        _panel.id = "bb-debug";
+        _panel.setAttribute("style",
+          "position:fixed;right:8px;bottom:8px;z-index:2147483647;max-width:46vw;max-height:44vh;" +
+          "overflow:auto;background:rgba(0,0,0,.86);color:#0f0;font:11px/1.35 ui-monospace,Menlo,Consolas,monospace;" +
+          "padding:8px 10px;border-radius:8px;white-space:pre-wrap;pointer-events:auto;");
+        _panel.textContent = "[bb-tracker] debug\n";
+        document.body.appendChild(_panel);
+      }
+      if (_panel) {
+        var line = args.map(function (a) {
+          return (a && typeof a === "object") ? (function () { try { return JSON.stringify(a); } catch (e) { return String(a); } })() : String(a);
+        }).join(" ");
+        _panel.textContent += (new Date().toISOString().slice(11, 19)) + "  " + line + "\n";
+        _panel.scrollTop = _panel.scrollHeight;
+      }
+    } catch (e) {}
   }
 
   function merge() {
@@ -202,58 +223,49 @@
   }
 
   // -------------------------------------------------------------------------
-  // time_on_page  -- HEARTBEAT: 1 evento a cada HB_STEP seg de tempo ATIVO
-  //   heartbeat  -> { heartbeat:true, final:false, bucket:5|10|15..., seconds:bucket }
-  //   fim (saida/navegacao) -> { final:true, heartbeat:false, seconds:<exato> } via sendBeacon
-  //   o tempo so acumula enquanto a aba esta VISIVEL (curva de leitura real).
+  // time_on_page  -- HEARTBEAT: 1 evento a cada HB_STEP seg na pagina
+  //   heartbeat -> { heartbeat:true, final:false, bucket:5|10|15..., seconds:bucket }
+  //   fim (saida/navegacao) -> { final:true, heartbeat:false, seconds:<exato> }
+  //   Contagem = wall-clock desde o load (simples e a prova de bug). posthog-js
+  //   troca sozinho pra sendBeacon quando a pagina esta saindo.
   //   Dashboard (Etapa 4): curva de retencao = count(DISTINCT person_id) por bucket.
-  //   Registrado cedo: o tick final nao pode se perder.
   // -------------------------------------------------------------------------
-  var HB_STEP = Math.max(1, CFG.heartbeatSeconds || 5);            // seg por bucket
-  var HB_MAX  = Math.max(HB_STEP, CFG.heartbeatMaxSeconds || 300); // para de "bater" apos isso (o tick final ainda vai)
-  var activeAccumMs = 0;                                            // ms ativos acumulados (aba visivel)
-  var visibleSince = (document.visibilityState === "hidden") ? 0 : Date.now();
+  var HB_STEP = Math.max(1, CFG.heartbeatSeconds || 5);
+  var HB_MAX  = Math.max(HB_STEP, CFG.heartbeatMaxSeconds || 300);
+  var loadTs = Date.now();
   var lastBucketSent = 0;
   var endSent = false;
+  var hbTimer = null;
 
-  function activeSecs() {
-    return Math.floor((activeAccumMs + (visibleSince ? Date.now() - visibleSince : 0)) / 1000);
-  }
+  function elapsedSecs() { return Math.floor((Date.now() - loadTs) / 1000); }
 
-  // mode: "hb" (batida normal) | "flush" (aba escondeu, via beacon) | "end" (fim, via beacon)
-  function timeTick(mode) {
-    var secs = activeSecs();
+  function timeTick(isFinal) {
+    var secs = elapsedSecs();
     var bucket = Math.floor(secs / HB_STEP) * HB_STEP;
-    if (mode === "end") {
+    if (isFinal) {
       if (endSent) return;
       endSent = true;
-      cap("time_on_page",
-        { seconds: secs, bucket: bucket, final: true, heartbeat: false, max_scroll_percent: scrollPct() },
-        { transport: "sendBeacon" });
+      cap("time_on_page", { seconds: secs, bucket: bucket, final: true, heartbeat: false, max_scroll_percent: scrollPct() });
       return;
     }
     if (bucket > HB_MAX) { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } return; }
-    if (bucket < HB_STEP) return;
-    if (mode === "hb" && bucket === lastBucketSent) return;
+    if (bucket < HB_STEP || bucket === lastBucketSent) return;
     lastBucketSent = bucket;
-    cap("time_on_page",
-      { seconds: bucket, bucket: bucket, final: false, heartbeat: true, max_scroll_percent: scrollPct() },
-      mode === "flush" ? { transport: "sendBeacon" } : undefined);
+    cap("time_on_page", { seconds: bucket, bucket: bucket, final: false, heartbeat: true, max_scroll_percent: scrollPct() });
   }
 
-  var hbTimer = setInterval(function () { timeTick("hb"); }, 1000);
+  hbTimer = setInterval(function () {
+    var s = elapsedSecs();
+    if (CFG.debug && s % 5 === 0 && s > 0) log("tick: elapsed=" + s + "s scroll=" + scrollPct() + "%");
+    timeTick(false);
+  }, 1000);
   log("heartbeat armado (step=" + HB_STEP + "s, max=" + HB_MAX + "s)");
 
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden") {
-      if (visibleSince) { activeAccumMs += Date.now() - visibleSince; visibleSince = 0; }
-      timeTick("flush");            // checkpoint (a pessoa pode voltar) - nao e o fim
-    } else {
-      visibleSince = Date.now();    // retomou: volta a acumular
-    }
+    if (document.visibilityState === "hidden") timeTick(true);
   });
-  window.addEventListener("pagehide", function () { timeTick("end"); });
-  window.addEventListener("beforeunload", function () { timeTick("end"); });
+  window.addEventListener("pagehide", function () { timeTick(true); });
+  window.addEventListener("beforeunload", function () { timeTick(true); });
 
   // -------------------------------------------------------------------------
   // cta_clicked  (clique em [data-bb-cta])  -- dispara logo antes de navegar
@@ -267,17 +279,29 @@
   }
   document.addEventListener("click", function (ev) {
     var el = findCta(ev.target);
-    if (!el) { log("click sem [data-bb-cta]"); return; }
+    if (!el) return;
+    var href = el.getAttribute("href") || el.getAttribute("data-href") || null;
     var text = (el.textContent || el.value || "")
       .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "").slice(0, 200);
-    log("cta_clicked ->", el.getAttribute("data-bb-pack"));
+    var pack = el.getAttribute("data-bb-pack") || null;
+    log("cta_clicked -> pack", pack, href || "");
+
+    // Se e um link normal que vai navegar, segura 250ms pro evento sair primeiro.
+    var isPlainNav =
+      el.tagName === "A" && href && href.charAt(0) !== "#" &&
+      !ev.defaultPrevented && ev.button === 0 &&
+      !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey &&
+      (!el.target || el.target === "" || el.target === "_self");
+
     cap("cta_clicked", {
-      pack: el.getAttribute("data-bb-pack") || null,
-      text: text || null,
-      href: el.getAttribute("href") || el.getAttribute("data-href") || null,
-      element_id: el.id || null,
-      element_tag: (el.tagName || "").toLowerCase() || null
-    }, { transport: "sendBeacon" });
+      pack: pack, text: text || null, href: href,
+      element_id: el.id || null, element_tag: (el.tagName || "").toLowerCase() || null
+    });
+
+    if (isPlainNav) {
+      ev.preventDefault();
+      setTimeout(function () { window.location.href = href; }, 250);
+    }
   }, true);
 
   // -------------------------------------------------------------------------
@@ -293,13 +317,15 @@
       if (p >= m && !firedMark[m]) {
         firedMark[m] = true;
         log("scroll_depth ->", m, "(" + p + "%)");
-        cap("scroll_depth", { depth: m, percent: p }, { transport: "sendBeacon" });
+        cap("scroll_depth", { depth: m, percent: p });
       }
     }
   }
 
   var scrollTimer = null;
+  var scrollLogged = 0;
   function onScroll() {
+    if (CFG.debug && Date.now() - scrollLogged > 1500) { scrollLogged = Date.now(); log("onScroll p=" + scrollPct() + "%"); }
     if (scrollTimer) return;
     scrollTimer = setTimeout(function () { scrollTimer = null; checkScroll(); }, 200);
   }
