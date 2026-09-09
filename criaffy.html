@@ -425,11 +425,11 @@
   (window.dataLayer = window.dataLayer || []).push({ 'gtm.start': Date.now(), event: 'gtm.js' });
 </script>
 
-<!-- 1b. tracker.js (PostHog EU) — page_init / utm_captured / scroll_depth / time_on_page / cta_clicked -->
+<!-- 1b. tracker.js (PostHog EU) — page_init / utm_captured / scroll_depth / time_on_page / cta_clicked
+     FONTE UNICA dos eventos PostHog. O bb-tracker.js legado do template foi removido
+     (2026-09-09): ele tinha um "PostHog Bridge" que duplicava esses mesmos nomes de evento
+     com schema diferente. GTM/GA4 stub, Basic Code TikTok, Meta e o decorator continuam. -->
 <script src="https://bb-tracker-nine.vercel.app/tracker.js" defer></script>
-
-<!-- 2. bb-tracker.js (do deploy) -->
-<script src="https://bb-tracker-template-pi.vercel.app/bb-tracker.js" defer></script>
 
 <!-- 3. Basic Code TikTok (pixel DAGEIURC77UDHLL3OFOG) -->
 <script>
