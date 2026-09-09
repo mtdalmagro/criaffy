@@ -268,8 +268,11 @@
   }, 1000);
   log("heartbeat armado (step=" + HB_STEP + "s, max=" + HB_MAX + "s)");
 
+  // aba escondeu = pode ser saida (mobile mata aba em bg sem pagehide) -> manda final.
+  // se voltar, re-arma: cada "saida real" gera 1 final; dashboard usa max(seconds).
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") timeTick(true);
+    else endSent = false;
   });
   window.addEventListener("pagehide", function () { timeTick(true); });
   window.addEventListener("beforeunload", function () { timeTick(true); });
