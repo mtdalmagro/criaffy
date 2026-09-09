@@ -275,7 +275,9 @@
   window.addEventListener("beforeunload", function () { timeTick(true); });
 
   // -------------------------------------------------------------------------
-  // cta_clicked  (clique em [data-bb-cta])  -- dispara logo antes de navegar
+  // cta_clicked  (clique em [data-bb-cta])
+  //   Nao mexe na navegacao: com request_batching:false o XHR sai sincrono no
+  //   handler (antes do navigate) e o posthog-js troca pra sendBeacon no unload.
   // -------------------------------------------------------------------------
   function findCta(node) {
     while (node && node.nodeType === 1 && node !== document.body) {
@@ -287,28 +289,16 @@
   document.addEventListener("click", function (ev) {
     var el = findCta(ev.target);
     if (!el) return;
-    var href = el.getAttribute("href") || el.getAttribute("data-href") || null;
     var text = (el.textContent || el.value || "")
       .replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "").slice(0, 200);
-    var pack = el.getAttribute("data-bb-pack") || null;
-    log("cta_clicked -> pack", pack, href || "");
-
-    // Se e um link normal que vai navegar, segura 250ms pro evento sair primeiro.
-    var isPlainNav =
-      el.tagName === "A" && href && href.charAt(0) !== "#" &&
-      !ev.defaultPrevented && ev.button === 0 &&
-      !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey &&
-      (!el.target || el.target === "" || el.target === "_self");
-
+    log("cta_clicked -> pack", el.getAttribute("data-bb-pack"));
     cap("cta_clicked", {
-      pack: pack, text: text || null, href: href,
-      element_id: el.id || null, element_tag: (el.tagName || "").toLowerCase() || null
+      pack: el.getAttribute("data-bb-pack") || null,
+      text: text || null,
+      href: el.getAttribute("href") || el.getAttribute("data-href") || null,
+      element_id: el.id || null,
+      element_tag: (el.tagName || "").toLowerCase() || null
     });
-
-    if (isPlainNav) {
-      ev.preventDefault();
-      setTimeout(function () { window.location.href = href; }, 250);
-    }
   }, true);
 
   // -------------------------------------------------------------------------
