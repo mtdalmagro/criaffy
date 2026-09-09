@@ -81,8 +81,14 @@
   //   { send_instantly: true }        -> XHR imediato (nao espera o batch de ~3s)
   //   { transport: "sendBeacon" }     -> sobrevive a navegacao/unload da pagina
   function cap(name, props, opts) {
-    try { posthog.capture(name, props, opts); log("capture:", name, opts || ""); }
-    catch (e) { log("capture FALHOU:", name, e); }
+    // SEMPRE resolver window.posthog na hora: o snippet stub e substituido pelo
+    // objeto real quando o array.js carrega. Guardar uma referencia local faria
+    // os eventos disparados depois do load caírem num stub morto (perda silenciosa).
+    try {
+      var ph = window.posthog;
+      if (opts) ph.capture(name, props, opts); else ph.capture(name, props);
+      log("capture:", name, opts || "");
+    } catch (e) { log("capture FALHOU:", name, e); }
   }
 
   function uuid() {
@@ -138,7 +144,8 @@
     log("posthog-js nao encontrado - o snippet oficial precisa vir ANTES do tracker.js. Abortando.");
     return;
   }
-  var posthog = window.posthog;
+  // NAO guardar window.posthog numa var: o stub e trocado pelo objeto real quando
+  // o array.js carrega. Sempre referenciar window.posthog na hora do uso.
 
   // -------------------------------------------------------------------------
   // user_id persistente  ->  init  ->  identify
@@ -146,7 +153,7 @@
   var userId = lsGet(LS_USER);
   if (!userId) { userId = uuid(); lsSet(LS_USER, userId); }
 
-  posthog.init(POSTHOG_KEY, {
+  window.posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
     debug: CFG.debug === true,
     person_profiles: "always",          // cria pessoa mesmo pra anonimo -> unicos por person_id
@@ -163,7 +170,7 @@
   });
 
   // super properties em TODOS os eventos
-  posthog.register({
+  window.posthog.register({
     pageType: PAGE_TYPE,
     pageId: PAGE_ID,
     bb_user_id: userId
